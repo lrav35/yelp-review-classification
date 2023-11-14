@@ -1,0 +1,4 @@
+# model code
+
+if __name__ == 'main':
+    print('hello world')
