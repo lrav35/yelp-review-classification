@@ -1,6 +1,8 @@
 import json
 import pandas as pd
 import matplotlib.pyplot as plt
+from sklearn.metrics import confusion_matrix
+# from sklearn.metrics import plot_confusion_matrix
 import torch
 from torch.utils.data import Dataset, DataLoader
 from torch.optim import AdamW
@@ -83,8 +85,10 @@ def should_run_eval(total_steps, freq, current_step):
 
 def eval(model, val_data):
     # TODO: add some kind of confusion matrix
+    print("evaluating model...\n")
     pbar = tqdm(range(len(val_data)))
     metric = evaluate.load("accuracy")
+    preds_and_true = {'preds': [], 'labels': []}
     model.eval()
     for batch in val_data:
         batch = {
@@ -99,13 +103,18 @@ def eval(model, val_data):
         logits = outputs.logits
         preds = torch.argmax(logits, dim=1)
         metric.add_batch(predictions=preds, references=batch["labels"])
+        preds_and_true['preds'].extend(preds)
+        preds_and_true['labels'].extend(batch["labels"])
         pbar.update(1)
     acc_result = metric.compute()
     print(f"Accuracy: {acc_result['accuracy']}")
+    return acc_result['accuracy'], preds_and_true
 
-def save_model(model, outpath, current_epoch, current_step):
+def save_model(model, outpath, current_epoch, current_step, results):
     print(f"saving model at epoch: {current_epoch}, step: {current_step}")
     outpath += f"/epoch_{current_epoch}/step_{current_step}"
+    cm = confusion_matrix(results['labels'], results['preds'])
+    # TODO: need to find a way to plot and save this CM as a file along with the model
     model.save_pretrained(outpath)
 
 def train_model(model, epochs, train_dataloader, val_dataloader, train_steps, optimizer, lr_scheduler):
@@ -114,6 +123,7 @@ def train_model(model, epochs, train_dataloader, val_dataloader, train_steps, op
     run_id = str(uuid.uuid4())
     output_dir = f"./outputs/bert/{run_id}"
     model.train()
+    best_accuracy = 0.0
     for epoch in range(epochs):
         current_epoch = epoch + 1
 
@@ -140,16 +150,15 @@ def train_model(model, epochs, train_dataloader, val_dataloader, train_steps, op
 
             # evaluate and save model
             if should_run_eval(len(train_dataloader), 2, current_step):
-                eval(model, val_dataloader)
-                save_model(model, output_dir, current_epoch, current_step)
+                accuracy, results = eval(model, val_dataloader)
+                if accuracy > best_accuracy:
+                    best_accuracy = accuracy
+                save_model(model, output_dir, current_epoch, current_step, results)
+                print(f"current best accuracy: {best_accuracy}")
                 model.train()
             pbar.update(1)
 
     save_model(model, tokenizer, output_dir, current_epoch, "final")
-
-
-
-
 
 
 
