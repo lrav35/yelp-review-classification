@@ -142,6 +142,8 @@ def train_model(model, epochs, train_dataloader, val_dataloader, train_steps, op
             outputs = model(**batch)
             loss = outputs.loss
 
+            # record loss? for training graph
+
             # backward
             loss.backward()
 
@@ -156,15 +158,17 @@ def train_model(model, epochs, train_dataloader, val_dataloader, train_steps, op
                 if accuracy > best_accuracy:
                     best_accuracy = accuracy
                     save_model(model, output_dir, current_epoch, current_step, results)
+                else:
+                    print('skipping model save...')
                 print(f"current best accuracy: {best_accuracy}\n")
                 model.train()
             pbar.update(1)
 
-    accuracy, results = eval(model, val_dataloader)
-    if accuracy > best_accuracy:
-        best_accuracy = accuracy
-    save_model(model, output_dir, "final", "final", results)
-    print(f"current best accuracy: {best_accuracy}\n")
+        # accuracy, results = eval(model, val_dataloader)
+        # if accuracy > best_accuracy:
+        #     best_accuracy = accuracy
+        # save_model(model, output_dir, "final", "final", results)
+        # print(f"current best accuracy: {best_accuracy}\n")
 
 
 
