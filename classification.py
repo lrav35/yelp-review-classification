@@ -43,10 +43,6 @@ class ReviewDataSet(Dataset):
 
     def format_dataset(self, dataframe: pd.DataFrame):
         input, token_type, att_mask = zip(*dataframe['text'].apply(self.tokenize_text))
-        # self.data['labels'] = torch.tensor(dataframe['stars'].to_list())-1
-        # self.data['input_ids'] = input
-        # self.data['token_type_ids'] = token_type
-        # self.data['attention_mask'] = att_mask
         self.data = {
             'labels': torch.tensor(dataframe['stars'].to_list())-1,
             'input_ids': input,
@@ -83,16 +79,11 @@ def should_run_eval(total_steps, freq, current_step):
     return current_step % (total_steps // freq) == 0
 
 def eval(model, val_data):
-    # TODO: add some kind of confusion matrix
     print("evaluating model...\n")
-    # pbar = tqdm(range(len(val_data)))
     metric = evaluate.load("accuracy")
     preds_and_true = {'preds': [], 'labels': []}
     model.eval()
-    count = 0
     for batch in val_data:
-        count+=1
-        print(count)
         batch = {
             "input_ids": batch["input_ids"].to(model.device),
             "labels": batch["labels"].to(model.device),
@@ -121,18 +112,17 @@ def save_model(model, outpath: str, current_epoch: int, current_step: int, resul
     
 
 def confusion(true: list, pred: list, epoch, step, outpath):
-    print(true)
-    print(pred)
     ConfusionMatrixDisplay.from_predictions(true, pred)
     outpath += f'/confusion_{epoch}_{step}.jpeg'
     plt.savefig(outpath)
     plt.close()
 
-def train_model(model, epochs, train_dataloader, val_dataloader, train_steps, optimizer, lr_scheduler):
+def train_model(model, epochs, train_dataloader, val_dataloader, train_steps, optimizer, lr_scheduler, save_path: str):
     pbar = tqdm(range(train_steps))
 
     run_id = str(uuid.uuid4())
-    output_dir = f"./outputs/bert/{run_id}"
+    print(f"model id :: {run_id}")
+    output_dir = f"{save_path}/outputs/bert/{run_id}"
     model.train()
     best_accuracy = 0.0
     for epoch in range(epochs):
@@ -158,18 +148,23 @@ def train_model(model, epochs, train_dataloader, val_dataloader, train_steps, op
             # update weights
             optimizer.step()
             lr_scheduler.step()
+            optimizer.zero_grad()
 
             # evaluate and save model
             if should_run_eval(len(train_dataloader), 2, current_step):
                 accuracy, results = eval(model, val_dataloader)
                 if accuracy > best_accuracy:
                     best_accuracy = accuracy
-                save_model(model, output_dir, current_epoch, current_step, results)
+                    save_model(model, output_dir, current_epoch, current_step, results)
                 print(f"current best accuracy: {best_accuracy}\n")
                 model.train()
             pbar.update(1)
 
-    save_model(model, tokenizer, output_dir, current_epoch, "final")
+    accuracy, results = eval(model, val_dataloader)
+    if accuracy > best_accuracy:
+        best_accuracy = accuracy
+    save_model(model, output_dir, "final", "final", results)
+    print(f"current best accuracy: {best_accuracy}\n")
 
 
 
