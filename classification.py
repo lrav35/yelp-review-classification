@@ -1,8 +1,7 @@
 import json
 import pandas as pd
 import matplotlib.pyplot as plt
-from sklearn.metrics import confusion_matrix
-# from sklearn.metrics import plot_confusion_matrix
+from sklearn.metrics import multilabel_confusion_matrix, ConfusionMatrixDisplay
 import torch
 from torch.utils.data import Dataset, DataLoader
 from torch.optim import AdamW
@@ -57,7 +56,7 @@ class ReviewDataSet(Dataset):
         return self.data
 
 
-def load_and_prepare_data(path: str, COLAB: bool) -> pd.DataFrame:
+def load_and_prepare_data(path: str, sample_size: int, COLAB: bool) -> pd.DataFrame:
     if COLAB:
         from google.colab import drive
         drive.mount('/content/drive')
@@ -66,7 +65,7 @@ def load_and_prepare_data(path: str, COLAB: bool) -> pd.DataFrame:
     data = []
     with open(path, "r") as f:
         for i, line in enumerate(f):
-            if i >= 75000:
+            if i >= sample_size:
                 break
             data.append(json.loads(line))
     df = pd.DataFrame(data)
@@ -86,11 +85,14 @@ def should_run_eval(total_steps, freq, current_step):
 def eval(model, val_data):
     # TODO: add some kind of confusion matrix
     print("evaluating model...\n")
-    pbar = tqdm(range(len(val_data)))
+    # pbar = tqdm(range(len(val_data)))
     metric = evaluate.load("accuracy")
     preds_and_true = {'preds': [], 'labels': []}
     model.eval()
+    count = 0
     for batch in val_data:
+        count+=1
+        print(count)
         batch = {
             "input_ids": batch["input_ids"].to(model.device),
             "labels": batch["labels"].to(model.device),
@@ -103,19 +105,28 @@ def eval(model, val_data):
         logits = outputs.logits
         preds = torch.argmax(logits, dim=1)
         metric.add_batch(predictions=preds, references=batch["labels"])
-        preds_and_true['preds'].extend(preds)
-        preds_and_true['labels'].extend(batch["labels"])
-        pbar.update(1)
+        preds_and_true['preds'].extend([p.item() for p in preds+1])
+        preds_and_true['labels'].extend([l.item() for l in batch["labels"]+1])
+
+        # pbar.update(1)
     acc_result = metric.compute()
     print(f"Accuracy: {acc_result['accuracy']}")
     return acc_result['accuracy'], preds_and_true
 
-def save_model(model, outpath, current_epoch, current_step, results):
+def save_model(model, outpath: str, current_epoch: int, current_step: int, results: dict):
     print(f"saving model at epoch: {current_epoch}, step: {current_step}")
     outpath += f"/epoch_{current_epoch}/step_{current_step}"
-    cm = confusion_matrix(results['labels'], results['preds'])
-    # TODO: need to find a way to plot and save this CM as a file along with the model
     model.save_pretrained(outpath)
+    confusion(results['labels'], results['preds'], current_epoch, current_step, outpath)
+    
+
+def confusion(true: list, pred: list, epoch, step, outpath):
+    print(true)
+    print(pred)
+    ConfusionMatrixDisplay.from_predictions(true, pred)
+    outpath += f'/confusion_{epoch}_{step}.jpeg'
+    plt.savefig(outpath)
+    plt.close()
 
 def train_model(model, epochs, train_dataloader, val_dataloader, train_steps, optimizer, lr_scheduler):
     pbar = tqdm(range(train_steps))
@@ -154,7 +165,7 @@ def train_model(model, epochs, train_dataloader, val_dataloader, train_steps, op
                 if accuracy > best_accuracy:
                     best_accuracy = accuracy
                 save_model(model, output_dir, current_epoch, current_step, results)
-                print(f"current best accuracy: {best_accuracy}")
+                print(f"current best accuracy: {best_accuracy}\n")
                 model.train()
             pbar.update(1)
 
