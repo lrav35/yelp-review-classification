@@ -1,4 +1,5 @@
 import json
+import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from sklearn.metrics import multilabel_confusion_matrix, ConfusionMatrixDisplay
@@ -91,8 +92,11 @@ def eval(model, val_data):
         }
         with torch.no_grad():
             outputs = model(**batch)
+        
+        # record loss
+        val_loss = outputs.loss.item()
 
-        # compute loss
+        # compute accuracy
         logits = outputs.logits
         preds = torch.argmax(logits, dim=1)
         metric.add_batch(predictions=preds, references=batch["labels"])
@@ -102,7 +106,7 @@ def eval(model, val_data):
         # pbar.update(1)
     acc_result = metric.compute()
     print(f"Accuracy: {acc_result['accuracy']}")
-    return acc_result['accuracy'], preds_and_true
+    return acc_result['accuracy'], preds_and_true, val_loss
 
 def save_model(model, outpath: str, current_epoch: int, current_step: int, results: dict):
     print(f"saving model at epoch: {current_epoch}, step: {current_step}")
@@ -117,6 +121,13 @@ def confusion(true: list, pred: list, epoch, step, outpath):
     plt.savefig(outpath)
     plt.close()
 
+def generate_loss_image(train_loss: list, val_loss: list, output_dir: str):
+    iter_x_ind = np.linspace(0, len(val_loss)-1, num=len(train_loss))
+    interp_val_loss = np.interp(iter_x_ind, np.arange(len(val_loss)), val_loss)
+    plt.plot(np.array(train_loss), color='b', label='training loss')
+    plt.plot(interp_val_loss, color='r', label='validation loss')
+    plt.savefig(output_dir + '/loss_plot.jpeg')
+
 def train_model(model, epochs, train_dataloader, val_dataloader, train_steps, optimizer, lr_scheduler, save_path: str):
     pbar = tqdm(range(train_steps))
 
@@ -125,9 +136,11 @@ def train_model(model, epochs, train_dataloader, val_dataloader, train_steps, op
     output_dir = f"{save_path}/outputs/bert/{run_id}"
     model.train()
     best_accuracy = 0.0
+    train_epoch_loss = []
+    val_epoch_loss = []
     for epoch in range(epochs):
         current_epoch = epoch + 1
-
+        train_batch_loss = []
         for step, batch in enumerate(train_dataloader):
             current_step = step + 1
             pbar.set_description(f"Epoch {current_epoch} :: Step {current_step}")
@@ -142,7 +155,7 @@ def train_model(model, epochs, train_dataloader, val_dataloader, train_steps, op
             outputs = model(**batch)
             loss = outputs.loss
 
-            # record loss? for training graph
+            train_batch_loss.append(loss.item())
 
             # backward
             loss.backward()
@@ -154,7 +167,8 @@ def train_model(model, epochs, train_dataloader, val_dataloader, train_steps, op
 
             # evaluate and save model
             if should_run_eval(len(train_dataloader), 2, current_step):
-                accuracy, results = eval(model, val_dataloader)
+                accuracy, results, val_loss = eval(model, val_dataloader)
+                val_epoch_loss.append(val_loss)
                 if accuracy > best_accuracy:
                     best_accuracy = accuracy
                     save_model(model, output_dir, current_epoch, current_step, results)
@@ -163,21 +177,15 @@ def train_model(model, epochs, train_dataloader, val_dataloader, train_steps, op
                 print(f"current best accuracy: {best_accuracy}\n")
                 model.train()
             pbar.update(1)
-
-        # accuracy, results = eval(model, val_dataloader)
-        # if accuracy > best_accuracy:
-        #     best_accuracy = accuracy
-        # save_model(model, output_dir, "final", "final", results)
-        # print(f"current best accuracy: {best_accuracy}\n")
-
-
+        train_epoch_loss.extend(train_batch_loss)
+    generate_loss_image(train_epoch_loss, val_epoch_loss, output_dir)
 
 if __name__ == '__main__':
 
     # load data
     print("loading data...\n")
     path = "yelp_academic_dataset_review.json"
-    df = load_and_prepare_data(path, False)
+    df = load_and_prepare_data(path, COLAB=False)
 
     # create dataset
     tokenizer = AutoTokenizer.from_pretrained('bert-base-cased', use_fast=False)
