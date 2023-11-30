@@ -110,7 +110,7 @@ def eval(model, val_data):
 
 def save_model(model, outpath: str, current_epoch: int, current_step: int, results: dict):
     print(f"saving model at epoch: {current_epoch}, step: {current_step}")
-    outpath += f"/epoch_{current_epoch}/step_{current_step}"
+    outpath += f"/model"
     model.save_pretrained(outpath)
     confusion(results['labels'], results['preds'], current_epoch, current_step, outpath)
     
@@ -166,7 +166,7 @@ def train_model(model, epochs, train_dataloader, val_dataloader, train_steps, op
             optimizer.zero_grad()
 
             # evaluate and save model
-            if should_run_eval(len(train_dataloader), 2, current_step):
+            if should_run_eval(len(train_dataloader), 5, current_step):
                 accuracy, results, val_loss = eval(model, val_dataloader)
                 val_epoch_loss.append(val_loss)
                 if accuracy > best_accuracy:
